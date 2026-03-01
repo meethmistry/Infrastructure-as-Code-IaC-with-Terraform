@@ -28,6 +28,7 @@ resource "aws_instance" "web" {
   subnet_id              = aws_subnet.public.id
   vpc_security_group_ids = [aws_security_group.web_sg.id]
   key_name               = var.key_name
+  user_data_replace_on_change = true
 
   # User data script to install Apache
   user_data = <<-EOF
@@ -53,10 +54,32 @@ resource "aws_instance" "db" {
   instance_type          = var.instance_type
   subnet_id              = aws_subnet.private.id
   vpc_security_group_ids = [aws_security_group.db_sg.id]
-  key_name               = var.key_name # Optional, for debugging if you set up bastion host
+  key_name               = var.key_name
+  iam_instance_profile   = aws_iam_instance_profile.ssm_profile.name  # ADD THIS LINE
 
-  # No user_data needed for database server in this simple example
-  # In real world, you'd install MySQL/MariaDB here
+ user_data = <<-EOF
+    #!/bin/bash
+    yum update -y
+    # Install correct MariaDB package for Amazon Linux 2
+    amazon-linux-extras install -y mariadb10.5
+    yum install -y mariadb-server
+    
+    # Start and enable MariaDB
+    systemctl start mariadb
+    systemctl enable mariadb
+    
+    # Wait for MySQL to be fully ready
+    sleep 10
+    
+    # Create database and user
+    mysql -e "CREATE DATABASE IF NOT EXISTS testdb;"
+    mysql -e "CREATE USER IF NOT EXISTS 'webuser'@'10.0.1.0/24' IDENTIFIED BY 'password123';"
+    mysql -e "GRANT ALL ON testdb.* TO 'webuser'@'10.0.1.0/24';"
+    mysql -e "FLUSH PRIVILEGES;"
+    
+    # Create flag file
+    touch /tmp/mysql-installed
+  EOF
 
   tags = {
     Name        = "${var.environment}-db-server"
